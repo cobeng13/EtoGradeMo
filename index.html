@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EtoGradeMo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f2f6f5; color: #142b27; font: 16px system-ui, sans-serif; }
+    main { max-width: 660px; margin: 7vh auto; padding: 24px; }
+    h1 { margin: 0; font-size: 2.5rem; }
+    p { line-height: 1.5; }
+    form { display: grid; gap: 18px; background: white; padding: 24px; border: 1px solid #d7e3df; border-radius: 12px; }
+    .pair { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    label { display: grid; gap: 6px; font-weight: 600; }
+    input, select, button { font: inherit; }
+    input:not([type=checkbox]), select { width: 100%; padding: 9px; color: inherit; border: 1px solid #839e96; border-radius: 6px; background: white; }
+    .check { display: flex; align-items: center; gap: 8px; }
+    .check:has(:disabled) { opacity: .6; }
+    button { background: #115846; color: white; border: 0; border-radius: 6px; padding: 12px; font-weight: 700; cursor: pointer; }
+    .download { display: inline-block; margin: 0 0 18px; padding: 9px 12px; border: 1px solid #115846; border-radius: 6px; color: #115846; font-weight: 700; }
+    button:disabled { opacity: .65; cursor: wait; }
+    #status { margin: 0; }
+    #status:empty { display: none; }
+    @media (max-width: 480px) { main { margin: 0 auto; } .pair { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>EtoGradeMo</h1>
+    <p>Upload a class record to download a Word document with a grade breakdown for every student.</p>
+    <a class="download" href="/download-class-record" download>Download blank class record (.xlsm)</a>
+    <form id="generator" action="/generate" method="post" enctype="multipart/form-data">
+      <label>Class record (.xlsm)<input name="workbook" type="file" accept=".xlsm" required></label>
+      <div class="pair">
+        <label>Date<input name="report_date" type="date" required></label>
+        <label>Section<input name="section" maxlength="60" required></label>
+      </div>
+      <label>Course code<input name="course_code" maxlength="30" required></label>
+      <label>Course title<input name="course_title" maxlength="100" required></label>
+      <label>Report type
+        <select name="report">
+          <option value="midterm">Midterm</option>
+          <option value="finals">Finals</option>
+          <option value="full" selected>Full Grade Breakdown</option>
+        </select>
+      </label>
+      <label class="check"><input name="show_pass_score" value="true" type="checkbox"> Add final exam needed to pass</label>
+      <button type="submit">Download Word document</button>
+      <p id="status" role="status"></p>
+    </form>
+  </main>
+  <script>
+    const form = document.querySelector('#generator');
+    const report = form.elements.report;
+    const checkbox = form.elements.show_pass_score;
+    const status = document.querySelector('#status');
+    const button = form.querySelector('button');
+    function updateCheckbox() {
+      checkbox.disabled = report.value === 'midterm';
+    }
+    report.addEventListener('change', updateCheckbox);
+    updateCheckbox();
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      status.textContent = 'Preparing the grade breakdown…';
+      try {
+        const response = await fetch(form.action, { method: 'POST', body: new FormData(form) });
+        if (!response.ok) {
+          const error = await response.json().catch(() => null);
+          throw new Error(typeof error?.detail === 'string' ? error.detail : 'Check your inputs and try again.');
+        }
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = response.headers.get('Content-Disposition').match(/filename="([^"]+)"/)[1];
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        status.textContent = 'Your Word document is ready.';
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
+

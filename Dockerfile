@@ -1,0 +1,12 @@
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt && useradd --uid 10001 appuser
+COPY app.py index.html ./
+COPY Template.docx with_macros_-_2026_blank_grading_sheet_with_autotransmuter.xlsm ./
+USER appuser
+EXPOSE 8006
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8006"]
+
+
