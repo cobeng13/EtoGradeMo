@@ -3,9 +3,9 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "${ETOGRADE_BIND_ADDRESS:-127.0.0.1}:${ETOGRADE_PORT:-8006}:8006"
+      - "${ETOGRADE_BIND_ADDRESS:-127.0.0.1}:${ETOGRADE_PORT:-8007}:8007"
     healthcheck:
-      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8006/', timeout=3).close()"]
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8007/', timeout=3).close()"]
       interval: 5s
       timeout: 4s
       retries: 5

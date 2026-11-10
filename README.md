@@ -6,14 +6,14 @@ Upload the macro-enabled class record and enter the report date, section, course
 
     docker compose up -d --build --wait
 
-Open http://localhost:8006. The service binds to localhost by default. For online use, put it behind the same authenticated HTTPS proxy as Student Progress Maker and set the request limit to 11 MB. Set ETOGRADE_PORT or ETOGRADE_BIND_ADDRESS in a local .env file to change the published port or address.
+Open http://localhost:8007. The service binds to localhost by default. For online use, put it behind the same authenticated HTTPS proxy as Student Progress Maker and set the request limit to 11 MB. Set ETOGRADE_PORT or ETOGRADE_BIND_ADDRESS in a local .env file to change the published port or address.
 
 On the deployment host, run `bash deploy/update.sh` from a clean Git checkout to pull, rebuild, and wait for the app to respond.
 
 ## Run with Python
 
     python -m pip install -r requirements.txt
-    python -m uvicorn app:app --port 8006
+    python -m uvicorn app:app --port 8007
 
 ## Workbook and template
 
