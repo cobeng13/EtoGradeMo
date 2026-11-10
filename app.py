@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import date
 from decimal import Decimal, ROUND_CEILING
@@ -68,22 +69,43 @@ def score_fields(pages):
                 yield cell, ALIASES.get(token, token)
 
 
-def read_students(contents, required):
+def upload_contents(workbook):
+    if Path(workbook.filename or "").suffix.lower() not in {".xlsx", ".xlsm"}:
+        raise HTTPException(400, "Upload an Excel workbook (.xlsx or .xlsm).")
+    contents = workbook.file.read(UPLOAD_LIMIT + 1)
+    if len(contents) > UPLOAD_LIMIT:
+        raise HTTPException(413, "Upload a workbook no larger than 10 MB.")
+    return contents
+
+
+@contextmanager
+def open_class_record(contents):
     with ZipFile(BytesIO(contents)) as archive:
         if sum(member.file_size for member in archive.infolist()) > 50 * 1024 * 1024:
             raise ValueError("The expanded workbook exceeds 50 MB.")
-
     book = load_workbook(BytesIO(contents), read_only=True, data_only=True)
     try:
-        matches = []
-        for sheet in book.worksheets:
-            header = next(sheet.iter_rows(max_row=1, max_col=256, values_only=True))
-            names = [str(value).strip() for value in header]
-            if required.issubset(names):
-                matches.append((sheet, names))
-        if len(matches) != 1:
-            raise ValueError("Provide one worksheet with the required class-record headers in row 1.")
-        sheet, names = matches[0]
+        yield book
+    finally:
+        book.close()
+
+
+def read_students(contents, required, sheet_name=None):
+    with open_class_record(contents) as book:
+        sheets = {sheet.title: sheet for sheet in book.worksheets}
+        if sheet_name is not None:
+            if sheet_name not in sheets:
+                raise ValueError("The selected worksheet is not in this workbook.")
+            sheet = sheets[sheet_name]
+        elif len(sheets) == 1:
+            sheet = next(iter(sheets.values()))
+        else:
+            raise ValueError("Select a worksheet before generating the report.")
+
+        header = next(sheet.iter_rows(max_row=1, max_col=256, values_only=True), ())
+        names = [str(value).strip() for value in header]
+        if not required.issubset(names):
+            raise ValueError("The selected worksheet is missing required class-record headers in row 1.")
         if any(names.count(name) != 1 for name in required):
             raise ValueError("The class record contains duplicate required headers.")
         columns = {name: names.index(name) for name in required}
@@ -107,8 +129,6 @@ def read_students(contents, required):
         if not students:
             raise ValueError("The class record contains no student names.")
         return students
-    finally:
-        book.close()
 
 
 def required_exam_score(student):
@@ -135,12 +155,12 @@ def fill_text(element, value):
         node.text = ""
 
 
-def build_report(contents, fields, report, show_pass_score):
+def build_report(contents, fields, report, show_pass_score, sheet_name=None):
     document = Document(ROOT / "Template.docx")
     pages = report_pages(document, report, show_pass_score)
     required = {"StudentName", *(field for _, field in score_fields(pages))}
     required.discard(PASS_SCORE)
-    students = read_students(contents, required)
+    students = read_students(contents, required, sheet_name)
     body = document.element.body
     for element in list(body):
         if element.tag != qn("w:sectPr"):
@@ -192,6 +212,21 @@ def download_class_record():
     )
 
 
+@app.post("/worksheets")
+def worksheets(workbook: Annotated[UploadFile, File()]):
+    contents = upload_contents(workbook)
+    try:
+        with open_class_record(contents) as book:
+            names = [sheet.title for sheet in book.worksheets]
+            if not names:
+                raise ValueError("The workbook does not contain any worksheets.")
+            return {"worksheets": names}
+    except (BadZipFile, InvalidFileException, XMLSyntaxError, KeyError, OSError) as error:
+        raise HTTPException(400, "This file could not be read as an Excel workbook.") from error
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+
+
 @app.post("/generate")
 def generate(
     workbook: Annotated[UploadFile, File()],
@@ -201,12 +236,9 @@ def generate(
     course_title: Annotated[str, Form(min_length=1, max_length=100)],
     report: Annotated[Literal["midterm", "finals", "full"], Form()],
     show_pass_score: Annotated[bool, Form()] = False,
+    sheet_name: Annotated[str | None, Form()] = None,
 ):
-    if Path(workbook.filename or "").suffix.lower() != ".xlsm":
-        raise HTTPException(400, "Upload an Excel macro-enabled workbook (.xlsm).")
-    contents = workbook.file.read(UPLOAD_LIMIT + 1)
-    if len(contents) > UPLOAD_LIMIT:
-        raise HTTPException(413, "Upload a workbook no larger than 10 MB.")
+    contents = upload_contents(workbook)
     if not all(value.strip() for value in (section, course_code, course_title)):
         raise HTTPException(400, "Enter the section, course code, and course title.")
 
@@ -217,7 +249,7 @@ def generate(
         "Course Title: Course Title (Input)": f"Course Title: {course_title.strip()}",
     }
     try:
-        result = build_report(contents, fields, report, show_pass_score)
+        result = build_report(contents, fields, report, show_pass_score, sheet_name)
     except (BadZipFile, InvalidFileException, XMLSyntaxError, KeyError, OSError) as error:
         raise HTTPException(400, "This file could not be read as an Excel workbook.") from error
     except ValueError as error:
@@ -227,5 +259,3 @@ def generate(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{report}-grade-breakdown.docx"'},
     )
-
-

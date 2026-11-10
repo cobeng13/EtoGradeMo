@@ -12,6 +12,7 @@
     p { line-height: 1.5; }
     form { display: grid; gap: 18px; background: white; padding: 24px; border: 1px solid #d7e3df; border-radius: 12px; }
     .pair { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    [hidden] { display: none !important; }
     label { display: grid; gap: 6px; font-weight: 600; }
     input, select, button { font: inherit; }
     input:not([type=checkbox]), select { width: 100%; padding: 9px; color: inherit; border: 1px solid #839e96; border-radius: 6px; background: white; }
@@ -31,7 +32,10 @@
     <p>Upload a class record to download a Word document with a grade breakdown for every student.</p>
     <a class="download" href="/download-class-record" download>Download blank class record (.xlsm)</a>
     <form id="generator" action="/generate" method="post" enctype="multipart/form-data">
-      <label>Class record (.xlsm)<input name="workbook" type="file" accept=".xlsm" required></label>
+      <label>Class record (.xlsx or .xlsm)<input name="workbook" type="file" accept=".xlsx,.xlsm" required></label>
+      <label id="sheet-picker" hidden>Worksheet
+        <select name="sheet_name" required disabled></select>
+      </label>
       <div class="pair">
         <label>Date<input name="report_date" type="date" required></label>
         <label>Section<input name="section" maxlength="60" required></label>
@@ -46,7 +50,7 @@
         </select>
       </label>
       <label class="check"><input name="show_pass_score" value="true" type="checkbox"> Add final exam needed to pass</label>
-      <button type="submit">Download Word document</button>
+      <button type="submit" disabled>Download Word document</button>
       <p id="status" role="status"></p>
     </form>
   </main>
@@ -61,15 +65,58 @@
     }
     report.addEventListener('change', updateCheckbox);
     updateCheckbox();
+    const workbook = form.elements.workbook;
+    const sheet = form.elements.sheet_name;
+    const picker = document.querySelector('#sheet-picker');
+    let inspection;
+
+    async function responseError(response, fallback) {
+      const error = await response.json().catch(() => null);
+      return new Error(typeof error?.detail === 'string' ? error.detail : fallback);
+    }
+
+    workbook.addEventListener('change', async () => {
+      inspection?.abort();
+      sheet.replaceChildren();
+      sheet.disabled = true;
+      picker.hidden = true;
+      button.disabled = true;
+      status.textContent = '';
+      if (!workbook.files.length) return;
+
+      const request = new AbortController();
+      inspection = request;
+      const data = new FormData();
+      data.append('workbook', workbook.files[0]);
+      status.textContent = 'Checking worksheets…';
+      try {
+        const response = await fetch('/worksheets', { method: 'POST', body: data, signal: request.signal });
+        if (!response.ok) throw await responseError(response, 'Could not read the workbook.');
+        const result = await response.json();
+        if (request.signal.aborted) return;
+        if (result.worksheets.length > 1) {
+          sheet.add(new Option('Choose a worksheet', ''));
+          for (const name of result.worksheets) sheet.add(new Option(name, name));
+          picker.hidden = false;
+          sheet.disabled = false;
+        }
+        status.textContent = '';
+        button.disabled = false;
+      } catch (error) {
+        if (!request.signal.aborted) status.textContent = error.message;
+      }
+    });
+
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       button.disabled = true;
-      status.textContent = 'Preparing the grade breakdown…';
+      const data = new FormData(form);
+      workbook.disabled = true;
+      status.textContent = 'Preparing the grade breakdownâ€¦';
       try {
-        const response = await fetch(form.action, { method: 'POST', body: new FormData(form) });
+        const response = await fetch(form.action, { method: 'POST', body: data });
         if (!response.ok) {
-          const error = await response.json().catch(() => null);
-          throw new Error(typeof error?.detail === 'string' ? error.detail : 'Check your inputs and try again.');
+          throw await responseError(response, 'Check your inputs and try again.');
         }
         const url = URL.createObjectURL(await response.blob());
         const link = document.createElement('a');
@@ -81,6 +128,7 @@
       } catch (error) {
         status.textContent = error.message;
       } finally {
+        workbook.disabled = false;
         button.disabled = false;
       }
     });
